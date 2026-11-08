@@ -1,0 +1,106 @@
+name: Train Russian moderation model
+
+on:
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: Fine-tuning epochs (1-4)
+        required: true
+        default: "2"
+        type: choice
+        options: ["1", "2", "3", "4"]
+      max_per_class:
+        description: Maximum real samples kept per label per dataset
+        required: true
+        default: "20000"
+        type: choice
+        options: ["5000", "10000", "20000", "30000"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: train-model-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: Fine-tune, evaluate, and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "2"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Cache Hugging Face downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface/hub
+            ~/.cache/huggingface/datasets
+          key: hf-${{ runner.os }}-${{ hashFiles('training/train.py', 'requirements.txt') }}
+          restore-keys: hf-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Fine-tune on verified Hugging Face datasets
+        run: >-
+          python -m training.train
+          --output-dir artifacts/neptune-ru-toxic
+          --epochs ${{ inputs.epochs }}
+          --max-per-class ${{ inputs.max_per_class }}
+          --batch-size 32
+          --max-length 192
+          --target-precision 0.95
+
+      - name: Smoke-test requested phrases (test only; not added to training)
+        run: python -m training.smoke_test artifacts/neptune-ru-toxic
+
+      - name: Upload ready-to-use model
+        uses: actions/upload-artifact@v4
+        with:
+          name: neptune-ru-toxic-model-${{ github.run_number }}
+          path: artifacts/neptune-ru-toxic/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Publish model to Hugging Face (optional)
+        if: ${{ vars.HF_MODEL_REPO != '' }}
+        env:
+          HF_MODEL_REPO: ${{ vars.HF_MODEL_REPO }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          token = os.environ.get("HF_TOKEN", "")
+          if not token:
+              print("HF_TOKEN is not configured; the ready model is available as this run's artifact.")
+              raise SystemExit(0)
+          from huggingface_hub import HfApi
+          api = HfApi(token=token)
+          repo = os.environ["HF_MODEL_REPO"]
+          api.create_repo(repo_id=repo, repo_type="model", exist_ok=True)
+          api.upload_folder(
+              folder_path="artifacts/neptune-ru-toxic",
+              repo_id=repo,
+              repo_type="model",
+              commit_message="Train NeptuneAI Russian moderation model",
+          )
+          print(f"Published model to https://huggingface.co/{repo}")
+          PY

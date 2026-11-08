@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>NeptuneAI — проверка текста</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#121a2e; --line:#26334c; --muted:#9ba9c3; --ink:#f3f6ff; --cyan:#74e0d0; --red:#ff7d8b; }
+    * { box-sizing:border-box }
+    body { margin:0; min-height:100vh; background:radial-gradient(ellipse at 50% -20%,#1b3150 0,transparent 55%),var(--bg); color:var(--ink); font:16px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; display:grid; place-items:center; padding:28px }
+    main { width:min(100%,760px) }
+    .brand { display:flex; align-items:center; gap:12px; margin-bottom:30px; color:#c9d5ea; font-weight:650; letter-spacing:.02em }
+    .mark { width:36px; height:36px; display:grid; place-items:center; color:#07121d; background:linear-gradient(145deg,#9af5df,#63cce2); border-radius:12px; font-size:18px; box-shadow:0 0 28px #72e0d033 }
+    .eyebrow { text-transform:uppercase; letter-spacing:.15em; font-size:11px; font-weight:750; color:var(--cyan) }
+    h1 { font-size:clamp(32px,6vw,50px); line-height:1.08; letter-spacing:-.045em; margin:10px 0 14px }
+    .intro { color:var(--muted); max-width:610px; margin:0 0 28px }
+    .card { border:1px solid var(--line); border-radius:20px; background:linear-gradient(160deg,#151f35,#101729 70%); padding:22px; box-shadow:0 24px 90px #0005 }
+    label { display:block; font-size:14px; font-weight:650; margin:0 0 10px }
+    textarea { width:100%; resize:vertical; min-height:170px; border:1px solid #33415d; border-radius:13px; background:#0b1222; color:var(--ink); padding:15px 16px; font:inherit; outline:none; transition:border-color .15s,box-shadow .15s }
+    textarea:focus { border-color:#6ad6ce; box-shadow:0 0 0 3px #6ad6ce1d }
+    textarea::placeholder { color:#70809c }
+    .controls { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-top:14px }
+    .hint,.count { color:var(--muted); font-size:12px }
+    button { border:0; border-radius:11px; padding:12px 19px; background:linear-gradient(110deg,#8df0d9,#69cce5); color:#06151c; font:inherit; font-size:14px; font-weight:750; cursor:pointer; transition:transform .15s,filter .15s }
+    button:hover { filter:brightness(1.08); transform:translateY(-1px) }
+    button:disabled { opacity:.6; cursor:wait; transform:none }
+    .result { display:none; margin-top:16px; padding:16px 18px; border:1px solid var(--line); background:#0c1424; border-radius:13px; align-items:center; justify-content:space-between; gap:12px }
+    .result.visible { display:flex }
+    .result.safe { border-color:#317f73 }
+    .result.violation { border-color:#99515c }
+    .result.error { border-color:#806d3d }
+    .result-label { font-weight:800; letter-spacing:.08em }
+    .safe .result-label { color:var(--cyan) }
+    .violation .result-label { color:var(--red) }
+    .result-note { color:var(--muted); font-size:12px; text-align:right }
+    .foot { color:#8694ad; font-size:12px; margin:16px 2px 0 }
+    @media(max-width:560px) { body{padding:20px} .card{padding:16px} .controls{align-items:flex-end} .hint{max-width:200px} }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><span class="mark" aria-hidden="true">N</span> NeptuneAI <span class="eyebrow">TEXT MODERATION</span></div>
+    <p class="eyebrow">КОМПАКТНАЯ РУССКАЯ МОДЕЛЬ</p>
+    <h1>Проверка текста,<br>без лишнего шума.</h1>
+    <p class="intro">Вставьте сообщение целиком — модель вернёт только метку. Каждый запрос анализируется отдельно, история чата не подмешивается.</p>
+    <section class="card" aria-label="Классификация сообщения">
+      <label for="message">Текст сообщения</label>
+      <textarea id="message" maxlength="20000" placeholder="Введите или вставьте текст для проверки…" spellcheck="false"></textarea>
+      <div class="controls">
+        <span class="hint">До 20 000 символов · текст не сохраняется интерфейсом</span>
+        <span class="count" id="count">0 / 20 000</span>
+      </div>
+      <div class="controls">
+        <span class="hint">Одна метка · без генерации длинного ответа</span>
+        <button id="check" type="button">Проверить текст <span aria-hidden="true">→</span></button>
+      </div>
+      <div class="result" id="result" role="status" aria-live="polite">
+        <span class="result-label" id="label"></span>
+        <span class="result-note" id="note"></span>
+      </div>
+    </section>
+    <p class="foot">Модель может ошибаться, особенно в цитатах, иронии и завуалированной речи. Метка — оценка модели, не абсолютная гарантия.</p>
+  </main>
+  <script>
+    const input = document.querySelector('#message');
+    const count = document.querySelector('#count');
+    const button = document.querySelector('#check');
+    const result = document.querySelector('#result');
+    const label = document.querySelector('#label');
+    const note = document.querySelector('#note');
+    input.addEventListener('input', () => count.textContent = `${input.value.length.toLocaleString('ru-RU')} / 20 000`);
+    async function classify() {
+      const text = input.value.trim();
+      result.className = 'result';
+      if (!text) { result.classList.add('visible','error'); label.textContent='ПУСТОЙ ТЕКСТ'; note.textContent='Добавьте сообщение для проверки'; return; }
+      button.disabled = true; button.textContent = 'Проверяем…';
+      try {
+        const response = await fetch('/api/classify', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text}) });
+        if (!response.ok) {
+          let message = 'Не удалось выполнить классификацию';
+          try { message = (await response.json()).detail || message; } catch {}
+          throw new Error(message);
+        }
+        const verdict = (await response.text()).trim();
+        if (verdict !== 'SAFE' && verdict !== 'VIOLATION') throw new Error('Сервер вернул неизвестный результат');
+        result.classList.add('visible', verdict === 'SAFE' ? 'safe' : 'violation');
+        label.textContent = verdict;
+        note.textContent = verdict === 'SAFE' ? 'Нарушение не обнаружено' : 'Обнаружены признаки нарушения';
+      } catch (error) {
+        result.classList.add('visible','error'); label.textContent='НЕТ РЕЗУЛЬТАТА'; note.textContent=error.message;
+      } finally { button.disabled = false; button.innerHTML = 'Проверить текст <span aria-hidden="true">→</span>'; }
+    }
+    button.addEventListener('click', classify);
+    input.addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') classify(); });
+  </script>
+</body>
+</html>
