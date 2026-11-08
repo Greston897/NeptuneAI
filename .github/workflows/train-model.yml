@@ -64,8 +64,8 @@ jobs:
         run: >-
           python -m training.train
           --output-dir artifacts/neptune-ru-toxic
-          --epochs ${{ inputs.epochs }}
-          --max-per-class ${{ inputs.max_per_class }}
+          --epochs ${{ inputs.epochs || '2' }}
+          --max-per-class ${{ inputs.max_per_class || '20000' }}
           --batch-size 32
           --max-length 192
           --target-precision 0.95
