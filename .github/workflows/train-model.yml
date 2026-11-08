@@ -1,6 +1,8 @@
 name: Train Russian moderation model
 
 on:
+  push:
+    branches: [arena/83561b84-neptuneai]
   workflow_dispatch:
     inputs:
       epochs:
